@@ -18,9 +18,17 @@ defmodule Phoenix.Channel.Server do
   def join(socket, channel, message, opts) do
     %{topic: topic, payload: payload, ref: ref, join_ref: join_ref} = message
 
-    starter = opts[:starter] || &PoolSupervisor.start_child/3
+    starter = opts[:starter] || (&PoolSupervisor.start_child/3)
     assigns = Map.merge(socket.assigns, Keyword.get(opts, :assigns, %{}))
-    socket = %{socket | topic: topic, channel: channel, join_ref: join_ref || ref, assigns: assigns}
+
+    socket = %{
+      socket
+      | topic: topic,
+        channel: channel,
+        join_ref: join_ref || ref,
+        assigns: assigns
+    }
+
     ref = make_ref()
     from = {self(), ref}
     child_spec = channel.child_spec({socket.endpoint, from})
@@ -84,7 +92,17 @@ defmodule Phoenix.Channel.Server do
   @doc """
   Hook invoked by Phoenix.PubSub dispatch.
   """
-  def dispatch(subscribers, from, %Broadcast{event: event} = msg) do
+  def dispatch(subscribers, from, message, custom_callback \\ nil) do
+    dispatch_other(subscribers, from, message)
+
+    if custom_callback do
+      custom_callback.(subscribers)
+    end
+
+    :ok
+  end
+
+  defp dispatch_other(subscribers, from, %Broadcast{event: event} = msg) do
     Enum.reduce(subscribers, %{}, fn
       {pid, _}, cache when pid == from ->
         cache
@@ -114,7 +132,7 @@ defmodule Phoenix.Channel.Server do
     :ok
   end
 
-  def dispatch(entries, :none, message) do
+  defp dispatch_other(entries, :none, message) do
     for {pid, _} <- entries do
       send(pid, message)
     end
@@ -122,7 +140,7 @@ defmodule Phoenix.Channel.Server do
     :ok
   end
 
-  def dispatch(entries, from, message) do
+  defp dispatch_other(entries, from, message) do
     for {pid, _} <- entries, pid != from do
       send(pid, message)
     end
@@ -136,7 +154,7 @@ defmodule Phoenix.Channel.Server do
 
   The message is encoded as `Phoenix.Socket.Broadcast`.
   """
-  def broadcast(pubsub_server, topic, event, payload)
+  def broadcast(pubsub_server, topic, event, payload, opts \\ [])
       when is_binary(topic) and is_binary(event) do
     broadcast = %Broadcast{
       topic: topic,
@@ -144,7 +162,7 @@ defmodule Phoenix.Channel.Server do
       payload: payload
     }
 
-    PubSub.broadcast(pubsub_server, topic, broadcast, __MODULE__)
+    PubSub.broadcast(pubsub_server, topic, broadcast, __MODULE__, opts)
   end
 
   @doc """
@@ -153,7 +171,7 @@ defmodule Phoenix.Channel.Server do
 
   Raises in case of crashes.
   """
-  def broadcast!(pubsub_server, topic, event, payload)
+  def broadcast!(pubsub_server, topic, event, payload, opts \\ [])
       when is_binary(topic) and is_binary(event) do
     broadcast = %Broadcast{
       topic: topic,
@@ -161,7 +179,7 @@ defmodule Phoenix.Channel.Server do
       payload: payload
     }
 
-    PubSub.broadcast!(pubsub_server, topic, broadcast, __MODULE__)
+    PubSub.broadcast!(pubsub_server, topic, broadcast, __MODULE__, opts)
   end
 
   @doc """
